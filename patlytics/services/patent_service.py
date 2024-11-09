@@ -1,10 +1,12 @@
 import json
 from datetime import datetime
+from thefuzz import fuzz
 
 from config import PATENTS_ALIAS, COMPANY_PRODUCTS_ALIAS
 from patlytics.services.gemini_service import GeminiService
 from patlytics.utils.opensearch import default_client
-from thefuzz import fuzz
+from patlytics.database.models import Report, Company
+from patlytics.database import db
 
 
 class PatentService:
@@ -39,20 +41,22 @@ class PatentService:
             with open('./data/patents.json') as f:
                 patents = json.load(f)
                 patent = next(
-                    (p for p in patents if p['id'] == patent_id), None)
+                    (p for p in patents if p['id'] == int(patent_id)), None)
 
             if not patent:
                 return {
                     "success": False,
                     "error": "Patent ID not found.",
                     "patent_id": patent_id
+
                 }
 
             return {
                 "success": True,
                 "data": {
                     "claims": patent['claims'],
-                    "title": patent.get('title', 'Unknown Patent')
+                    "title": patent.get('title', 'Unknown Patent'),
+                    "publication_number": patent.get('publication_number', '')
                 }
             }
 
@@ -62,6 +66,22 @@ class PatentService:
                 "error": f"Failed to get patent data: {str(e)}",
                 "patent_id": patent_id
             }
+
+    def forward_company_name(self) -> dict:
+        """
+        Forward company names to FE
+
+        """
+        with open('./data/company_products.json') as f:
+            company_data = json.load(f)
+
+        company_names = [company['name']
+                         for company in company_data['companies']]
+
+        return {
+            "success": True,
+            "data": company_names
+        }
 
     def get_company_data(self, company_name: str, threshold: int = 80) -> dict:
         """
@@ -177,10 +197,12 @@ class PatentService:
                     "product_name": "name of product",
                     "infringement_likelihood": "High/Medium/Low",
                     "claims_at_issue": [list of specific claim numbers that might be infringed],
-                    "explanation": "Detailed explanation of potential infringement"
+                    "explanation": "Detailed explanation of potential infringement",
+                    "specific_features": "specific features of the product that might infringe the patent"
                 }},
                 // ... one entry for each product
             ]
+            "overall_risk_assessment": "general assessment of the risk of infringement"
         }}
         """
 
@@ -217,14 +239,18 @@ class PatentService:
                 "Medium": 2,
                 "Low": 1
             }[x['infringement_likelihood']], reverse=True)
+            overall_risk_assessment = analysis_result.get(
+                'overall_risk_assessment', '')
 
             # 6. Return formatted result
             return {
-                "patent_id": patent_id,
+                "analysis_date": datetime.now().isoformat(),
+                "analysis_id": patent_id,
+                "patent_id": patent_data.get('publication_number'),
                 "patent_title": patent_data['title'],
                 "company_name": company_name,
                 "top_infringing_products": matches[:2],
-                "analysis_date": datetime.now().isoformat()
+                "overall_risk_assessment": overall_risk_assessment
             }
 
         except Exception as e:
@@ -233,3 +259,43 @@ class PatentService:
                 "patent_id": patent_id,
                 "company_name": company_name
             }
+
+    def save_analysis(self, uid: int, patent_id: int, matched_company_name: str, input_company: str, analysis: dict) -> dict:
+        """
+        Save analysis to Report database
+        """
+        company_id = None
+        company = Company.query.filter_by(
+            name=matched_company_name).first()
+        if company:
+            company_id = company.id
+
+        new_report = Report(
+            uid=uid,
+            patent_id=patent_id,
+            company_id=company_id,
+            input_company=input_company,
+            analysis_results=analysis
+        )
+
+        db.session.add(new_report)
+
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return {
+                "success": False,
+                "error": f"Failed to save analysis: {str(e)}"
+            }
+
+        return {
+            "id": new_report.id,
+            "uid": new_report.uid,
+            "patent_id": new_report.patent_id,
+            "company_id": new_report.company_id,
+            "input_company": new_report.input_company,
+            "analysis_results": new_report.analysis_results,
+            "created_at": new_report.ctime,
+            "updated_at": new_report.utime
+        }

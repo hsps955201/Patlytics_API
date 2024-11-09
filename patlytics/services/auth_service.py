@@ -46,12 +46,17 @@ class AuthService:
             db.session.add(user)
             db.session.commit()
 
+            access_token, refresh_token = self.generate_tokens(user.id)
             return {
                 'success': True,
                 'message': 'User registered successfully',
                 'user': {
                     'id': user.id,
                     'email': user.email
+                },
+                'tokens': {
+                    'access_token': access_token,
+                    'refresh_token': refresh_token
                 }
             }
 
