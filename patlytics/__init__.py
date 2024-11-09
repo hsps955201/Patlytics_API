@@ -1,6 +1,6 @@
 import pymysql
 from flask import Flask
-
+from flask_cors import CORS
 import config
 from patlytics.database import db, migrate
 
@@ -18,7 +18,7 @@ def create_app(testing=False):
             f"{config.DB_HOST}:{config.DB_PORT}/{config.TEST_DB_NAME}?"
             f"{config.SQLALCHEMY_CHARSET_SYNTAX}"
         )
-
+    CORS(app)
     db.init_app(app)
     migrate.init_app(app, db)
 
