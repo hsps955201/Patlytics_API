@@ -115,3 +115,15 @@ class Report(TimestampMixin, db.Model):
             cascade="all, delete-orphan"
         )
     )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "uid": self.uid,
+            "patent_id": self.patent_id,
+            "company_id": self.company_id,
+            "input_company": self.input_company,
+            "analysis_results": self.analysis_results,
+            "created_at": self.ctime,
+            "updated_at": self.utime
+        }
